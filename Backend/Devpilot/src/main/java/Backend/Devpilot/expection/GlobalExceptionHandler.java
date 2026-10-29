@@ -4,13 +4,18 @@ import java.time.Instant;
 import java.util.Map;
 
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.async.AsyncRequestTimeoutException;
+
+import jakarta.servlet.http.HttpServletRequest;
+import lombok.extern.slf4j.Slf4j;
 
 
-
+@Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
@@ -38,10 +43,10 @@ public class GlobalExceptionHandler {
         return error(HttpStatus.BAD_REQUEST, message);
     }
 
-    @ExceptionHandler(Exception.class)
-    ResponseEntity<Map<String, Object>> handleGeneric(Exception ex) {
-        return error(HttpStatus.INTERNAL_SERVER_ERROR, ex.getMessage() != null ? ex.getMessage() : "Unexpected error");
-    }
+//    @ExceptionHandler(Exception.class)
+//    ResponseEntity<Map<String, Object>> handleGeneric(Exception ex) {
+//        return error(HttpStatus.INTERNAL_SERVER_ERROR, ex.getMessage() != null ? ex.getMessage() : "Unexpected error");
+//    }
 
     private ResponseEntity<Map<String, Object>> error(HttpStatus status, String message) {
         return ResponseEntity.status(status).body(Map.of(
@@ -49,5 +54,19 @@ public class GlobalExceptionHandler {
                 "error", status.getReasonPhrase(),
                 "message", message,
                 "timestamp", Instant.now().toString()));
+    }
+    
+    @ExceptionHandler(AsyncRequestTimeoutException.class)
+    public void handleAsyncTimeout() {
+        // SSE timed out; nothing can be written to the closed stream
+    }
+
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<Map<String, Object>> handleGeneric(Exception ex, HttpServletRequest req) {
+        log.error("Unhandled exception on {} {}", req.getMethod(), req.getRequestURI(), ex);
+        return ResponseEntity.status(500)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("status", 500, "error", "Internal Server Error",
+                             "message", String.valueOf(ex.getMessage())));
     }
 }

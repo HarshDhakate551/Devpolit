@@ -1,7 +1,9 @@
 package Backend.Devpilot.service.ai;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
@@ -26,41 +28,47 @@ public class ChatStreamHandler {
     private final ChatMessageRepository chatMessageRepository;
     private final CitationMapper citationMapper;
 
-    public SseEmitter stream(
+    public void stream(
+            SseEmitter emitter,
             UUID sessionId,
-            ChatMessageResponse savedUserMessage,
             List<CitationDto> citations,
             String systemPrompt,
             String userPrompt) {
 
-        SseEmitter emitter = new SseEmitter(RagSettings.STREAM_TIMEOUT_MS);
         StringBuilder fullReply = new StringBuilder();
 
-        try {
-            emitter.send(SseEmitter.event()
-                    .name("user_message")
-                    .data(savedUserMessage));
+        AtomicBoolean first = new AtomicBoolean(true);
+        long start = System.currentTimeMillis();
 
-            ChatClient.builder(chatModel)
-                    .build()
-                    .prompt()
-                    .system(systemPrompt)
-                    .user(userPrompt)
-                    .stream()
-                    .content()
-                    .doOnNext(token -> appendToken(emitter, fullReply, token))
-                    .doOnError(err -> {
-                        log.error("Chat stream error", err);
-                        emitter.completeWithError(err);
-                    })
-                    .doOnComplete(() -> completeStream(
-                            emitter, sessionId, fullReply, citations))
-                    .subscribe();
-        } catch (Exception ex) {
-            emitter.completeWithError(ex);
-        }
-
-        return emitter;
+        ChatClient.builder(chatModel)
+                .build()
+                .prompt()
+                .system(systemPrompt)
+                .user(userPrompt)
+                .stream()
+                .content()
+                .timeout(Duration.ofSeconds(60))   // fail visibly instead of hanging
+                .doOnSubscribe(s -> log.info("LLM stream subscribed"))
+                .doOnNext(token -> {
+                    if (first.compareAndSet(true, false)) {
+                        log.info("First token after {} ms", System.currentTimeMillis() - start);
+                    }
+                    appendToken(emitter, fullReply, token);
+                })
+                .doOnComplete(() -> {
+                    log.info("LLM stream complete, {} chars", fullReply.length());
+                    completeStream(emitter, sessionId, fullReply, citations);
+                })
+                .doOnCancel(() -> log.warn("LLM stream cancelled"))
+                .doOnError(err -> {
+                    log.error("Chat stream error", err);
+                    try {
+                        emitter.send(SseEmitter.event().name("error")
+                                .data("The AI model is unavailable right now. Please try again."));
+                    } catch (Exception ignored) {}
+                    emitter.complete();
+                })
+                .subscribe(token -> { }, err -> { });
     }
 
     private void appendToken(SseEmitter emitter, StringBuilder fullReply, String token) {
@@ -93,7 +101,8 @@ public class ChatStreamHandler {
             emitter.send(SseEmitter.event().name("done").data("[DONE]"));
             emitter.complete();
         } catch (Exception ex) {
-            emitter.completeWithError(ex);
+            log.error("Failed to finish chat stream", ex);
+            emitter.complete();
         }
     }
 

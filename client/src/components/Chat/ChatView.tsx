@@ -10,18 +10,27 @@ import { ChatSidebar } from "./ChatSidebar";
 import { IndexingState } from "./IndexingState";
 import { ChatComposer } from "./ChatComposer";
 import { ChatMessages } from "./ChatMessages";
+import { useQueryClient } from "@tanstack/react-query";
+import { queryKeys } from "../../lib/query-keys";
 
 export function ChatView({ repoId }: { repoId: string }) {
+  const queryClient = useQueryClient();
   const repoQuery = useRepository(repoId);
-  const isIndexing = repoQuery.data?.indexStatus === "INDEXING";
-  const statusQuery = useIndexStatus(
-    repoId,
-    isIndexing || repoQuery.data?.indexStatus === "PENDING"
-  );
+  const repoStatus = repoQuery.data?.indexStatus;
+  const repoIsTerminal = repoStatus === "READY" || repoStatus === "FAILED";
 
-  const indexStatus =
-    statusQuery.data?.indexStatus ?? repoQuery.data?.indexStatus;
+  // keep polling until a terminal state is known
+  const statusQuery = useIndexStatus(repoId, Boolean(repoQuery.data) && !repoIsTerminal);
+
+  const polledStatus = statusQuery.data?.indexStatus;
+  const indexStatus = repoIsTerminal ? repoStatus : polledStatus ?? repoStatus;
   const ready = indexStatus === "READY";
+
+  useEffect(() => {
+    if (polledStatus === "READY") {
+      queryClient.invalidateQueries({ queryKey: queryKeys.repos.detail(repoId) });
+    }
+  }, [polledStatus, queryClient, repoId]);
 
   const sessionsQuery = useChatSessions(repoId, ready);
   const createSession = useCreateChatSession(repoId);
@@ -81,7 +90,7 @@ useEffect(() => {
       title={repo.fullName}
       description={
         ready
-          ? "Ask questions grounded in this repository"
+          ? undefined
           : "Waiting for indexing to finish"
       }
       actions={

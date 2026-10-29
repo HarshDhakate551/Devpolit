@@ -39,9 +39,10 @@ export function AppShell({
                 size="lg"
                 render={<Link to="/dashboard" />}
                 tooltip="DevPilot"
+                className="group-data-[collapsible=icon]:p-0! group-data-[collapsible=icon]:justify-center!"
               >
                 <DevPilotIcon className="size-8 rounded-[10px]" />
-                <div className="grid flex-1 text-left text-sm leading-tight">
+                <div className="grid flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:hidden">
                   <span className="truncate font-semibold">DevPilot</span>
                   <span className="truncate text-xs text-muted-foreground">
                     Chat with your code
@@ -152,13 +153,13 @@ export function AppShell({
         {!hideHeader && (
           <header className="sticky top-0 z-20 flex h-14 shrink-0 items-center gap-2 border-b bg-background/80 px-4 backdrop-blur">
             <SidebarTrigger className="-ml-1" />
-            <Separator orientation="vertical" className="mr-2 h-4" />
+            <Separator orientation="vertical" className="mr-2 h-[100%]" />
             <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
               <div className="min-w-0">
                 {title && (
-                  <h1 className="truncate font-heading text-sm font-medium">
+                  <h2 className="truncate font-heading text-sm font-medium">
                     {title}
-                  </h1>
+                  </h2>
                 )}
                 {description && (
                   <p className="truncate text-xs text-muted-foreground">
