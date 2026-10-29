@@ -23,7 +23,10 @@ import Backend.Devpilot.service.ai.ChatPromptBuilder;
 import Backend.Devpilot.service.ai.ChatStreamHandler;
 import Backend.Devpilot.service.ai.CitationMapper;
 import Backend.Devpilot.service.ai.CodeContextRetriver;
+import Backend.Devpilot.service.ai.RagSettings;
 import lombok.RequiredArgsConstructor;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Chat sessions and the RAG chat pipeline entry point.
@@ -32,6 +35,7 @@ import lombok.RequiredArgsConstructor;
  * validate → save user message → retrieve code context → build prompts → stream AI reply.
  * Each step is implemented in a dedicated class under {@code service.ai}.
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class ChatService {
@@ -43,6 +47,9 @@ public class ChatService {
     private final ChatPromptBuilder chatPromptBuilder;
     private final ChatStreamHandler chatStreamHandler;
     private final CitationMapper citationMapper;
+    
+    private static final java.util.concurrent.ExecutorService CHAT_EXECUTOR =
+            java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor();
 
     @Transactional
     public ChatSessionResponse createSession(UUID userId, CreateChatSessionRequest request) {
@@ -89,36 +96,42 @@ public class ChatService {
     }
 
     public SseEmitter streamReply(UUID userId, UUID sessionId, String userContent) {
-        // 1. Ensure the session exists and the repo is indexed
         ChatSession session = requireSession(userId, sessionId);
         Repository repo = repoService.requireOwned(session.getRepositoryId(), userId);
         if (repo.getIndexStatus() != IndexStatus.READY) {
             throw new BadRequestException("Repository is not ready for chat");
         }
 
-        // 2. Persist the user's message
-        ChatMessage userMessage = chatMessageRepository.save(ChatMessage.builder()
-                .sessionId(session.getId())
-                .role(MessageRole.USER)
-                .content(userContent)
-                .build());
+        SseEmitter emitter = new SseEmitter(RagSettings.STREAM_TIMEOUT_MS);
 
-        // 3. RAG retrieval — find code chunks similar to the question
-        var retrievedContext = codeContextRetriever.retrive(repo.getId(), userContent);
+        CHAT_EXECUTOR.execute(() -> {
+            try {
+                ChatMessage userMessage = chatMessageRepository.save(ChatMessage.builder()
+                        .sessionId(session.getId())
+                        .role(MessageRole.USER)
+                        .content(userContent)
+                        .build());
+                emitter.send(SseEmitter.event().name("user_message").data(toMessageResponse(userMessage)));
+                emitter.send(SseEmitter.event().name("status").data("searching"));
 
-        // 4. Build LLM prompts from retrieved context + question
-        String systemPrompt = chatPromptBuilder.systemPrompt(repo.getFullName());
-        String userPrompt = chatPromptBuilder.userPrompt(retrievedContext.contextText(), userContent);
+                long t0 = System.currentTimeMillis();
+                var ctx = codeContextRetriever.retrive(repo.getId(), userContent);
+                log.info("retrieval took {} ms", System.currentTimeMillis() - t0);
 
-        // 5. Stream OpenAI response to the client (SSE)
-        return chatStreamHandler.stream(
-                session.getId(),
-                toMessageResponse(userMessage),
-                retrievedContext.citations(),
-                systemPrompt,
-                userPrompt);
+                String systemPrompt = chatPromptBuilder.systemPrompt(repo.getFullName());
+                String userPrompt = chatPromptBuilder.userPrompt(ctx.contextText(), userContent);
+
+                chatStreamHandler.stream(emitter, session.getId(), ctx.citations(), systemPrompt, userPrompt);
+            } catch (Exception e) {
+                log.error("Chat failed", e);
+                try {
+                    emitter.send(SseEmitter.event().name("error").data("Something went wrong. Please try again."));
+                } catch (Exception ignored) {}
+                emitter.complete();
+            }
+        });
+        return emitter;
     }
-
     private ChatSessionResponse toSessionResponse(ChatSession session) {
         return new ChatSessionResponse(
                 session.getId(),
