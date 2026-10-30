@@ -40,9 +40,14 @@ export function useLogout(){
         },
         onSuccess: ()=>{
             setAuthCookies(false);
-            queryClient.invalidateQueries({ queryKey: queryKeys.auth.all });
-            navigate("/login")
-        }
-    })
+
+            // Navigate first so protected components unmount
+            navigate("/login", { replace: true });
+
+            // Then wipe cached data (no refetch, no error state)
+            queryClient.removeQueries({ queryKey: queryKeys.auth.all });
+            queryClient.clear(); // optional: drops ALL cached data (projects, etc.)
+        },
+    });
 }
 

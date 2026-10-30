@@ -10,6 +10,7 @@ import { ProtectedRoute } from "./components/proxy/ProtectedRoute"
 import HomePage from "./components/home/HomePage"
 import ChatPage from "./app/chat/ChatPage"
 import { SettingsDashboard } from "./components/Dashboard/SettingsDashboad"
+import { OverviewDashboard } from "./components/Dashboard/OverviewDashboard"
 
 function App() {
   return (
@@ -33,10 +34,13 @@ function App() {
             
             {/* Protected Routes (redirects to login if not authed) */}
             <Route element={<ProtectedRoute />}>
+                {/* Each page renders its own AppShell independently */}
                 <Route path="/dashboard" element={<DashboardPage />} />
-                <Route path="/chat/:repoId" element={<ChatPage />} />
+                <Route path="/dashboard/overview" element={<OverviewDashboard />} />
                 <Route path="/dashboard/settings" element={<SettingsDashboard />} />
-                {/* <Route path="/chat" element={<ChatPage />} /> */}
+                
+                {/* Other pages / chat */}
+                <Route path="/chat/:repoId" element={<ChatPage />} />
             </Route>
             <Route path="/auth/callback" element={<AuthCallbackPage />} />
 

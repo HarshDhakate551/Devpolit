@@ -13,7 +13,7 @@ import { getGithubLoginUrl } from "../../lib/api";
 import { useCurrentUser } from "../../hooks/use-auth";
 
 function LoginLoading(){
-    return(<div className="flex min-h-svh item-center justify-center" >
+    return(<div className="flex min-h-svh items-center justify-center" >
         <Spinner className="size-8" />
     </div>)
 }
@@ -30,8 +30,9 @@ const LoginContent = ()=>{
             navigate(next.startsWith("/") ? next: "/dashboard");
     },[user,isLoading, navigate, next])
     
+    if(isLoading) return <LoginLoading />
+
     return(<>
-        {isLoading ? <LoginLoading/> : null}
         
         <div className="relative flex min-h-svh flex-col overflow-hidden bg-background">
             <div className="pointer-events-none absolute insert-0 bg-[radial-gradient(ellipse_at_top,oklch(from_var(--primary)_l_c_h/0.1),transparent_55%)]" />
